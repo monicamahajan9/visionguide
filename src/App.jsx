@@ -1,15 +1,16 @@
-import { useState, useRef, useCallback, useEffect, Component } from 'react';
+// src/App.jsx
+
+import { useState, useRef, useEffect, useCallback, Component } from 'react';
+import { initCamera, stopCamera } from './modules/camera.js';
+import { startLoop, stopLoop } from './modules/loop.js';
+import { speak, cancel, resetSpeech } from './modules/speech.js';
 import GoalInput from './components/GoalInput.jsx';
 import StartStopButton from './components/StartStopButton.jsx';
 import StatusDisplay from './components/StatusDisplay.jsx';
 import CameraPreview from './components/CameraPreview.jsx';
-import { initCamera, stopCamera } from './modules/camera.js';
-import { startLoop, stopLoop } from './modules/loop.js';
-import { startRecognition } from './modules/recognition.js';
-import { speak } from './modules/speech.js';
-import { resetGoalTracker } from './modules/goalTracker.js';
+import Onboarding from './components/Onboarding.jsx';
 
-// Standard React error boundary. On error, speaks and shows a reload button.
+// Standard React error boundary (setup spec §13.4). On error, speaks and shows a reload button.
 class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -38,85 +39,166 @@ class ErrorBoundary extends Component {
   }
 }
 
-// Root component. Owns all state. Wires state to modules and components only — no business logic here.
-function App() {
-  const [goal, setGoal] = useState('');               // User's navigation destination
-  const [status, setStatus] = useState('idle');        // 'idle' | 'listening' | 'navigating' | 'arrived'
-  const [lastSpoken, setLastSpoken] = useState('');    // Last TTS string, shown on screen
-  const [context, setContext] = useState([]);          // Last 2 navigation_direction strings
+export default function App() {
+  // --- State ---
+  const [goal, setGoal] = useState('');
+  const [status, setStatus] = useState('idle');
+  // 'idle' | 'listening' | 'navigating' | 'arrived'
+  const [lastSpoken, setLastSpoken] = useState('');
+  const [context, setContext] = useState([]);
+  const [showOnboarding, setShowOnboarding] = useState(
+    !sessionStorage.getItem('vg_visited')
+  );
 
+  // --- Refs ---
   const videoRef = useRef(null);
-  const cameraRef = useRef(null);   // MediaStream from initCamera
-  const stateRef = useRef({ goal, context });
+  const streamRef = useRef(null);
+
+  // Keep loopStateRef in sync with state so the interval reads fresh values
+  const loopStateRef = useRef({ goal, context });
   useEffect(() => {
-    stateRef.current = { goal, context };
+    loopStateRef.current = { goal, context };
   }, [goal, context]);
 
-  const handleMicClick = useCallback(() => {
-    setStatus('listening');
-    speak('Listening...');
-    startRecognition(
-      (result) => {
-        setGoal(result);
-        setStatus('idle');
-        speak(`I heard: ${result}. Tap Start to begin.`);
-      },
-      () => {
-        setStatus('idle');
-        speak("Didn't catch that. Please try again or type your destination.");
-      }
-    );
+  // --- Callbacks for the loop ---
+  const handleSpeak = useCallback((text) => {
+    setLastSpoken(text);
   }, []);
 
+  const handleContextUpdate = useCallback((direction) => {
+    setContext(prev => [...prev.slice(-1), direction]); // Keep last 2
+  }, []);
+
+  const handleArrival = useCallback(() => {
+    setStatus('arrived');
+  }, []);
+
+  const handleError = useCallback((errorMsg) => {
+    console.error('Navigation error:', errorMsg);
+    // Loop continues — errors are handled inside loop.js with "Still scanning"
+  }, []);
+
+  const handleOnboardingDismiss = useCallback(() => {
+    sessionStorage.setItem('vg_visited', '1');
+    setShowOnboarding(false);
+    // Speak the onboarding summary for screen reader users
+    speak('Welcome to VisionGuide. Type or speak your destination, then tap Start Navigation.');
+  }, []);
+
+  // --- Start navigation ---
   const handleStart = useCallback(async () => {
-    if (!goal) return;
-    resetGoalTracker();
-    setContext([]);
-    setStatus('navigating');
+    if (!goal.trim()) return;
+    if (status === 'navigating') return;
 
-    // Safety prompt (mandatory): plays every session, before the navigation loop begins, cannot be skipped
-    speak('VisionGuide is a navigation aid only. Keep using your cane or other mobility aid.');
-
-    try {
-      cameraRef.current = await initCamera(videoRef.current);
-    } catch {
-      setStatus('idle');
-      return;
+    // Initialize camera if not already running
+    if (!streamRef.current) {
+      try {
+        streamRef.current = await initCamera(videoRef.current);
+      } catch {
+        setLastSpoken('Camera access denied. Please allow camera and try again.');
+        return;
+      }
     }
 
-    startLoop(videoRef.current, stateRef, {
-      onSpeak: setLastSpoken,
-      onContextUpdate: (direction) => setContext(prev => [...prev.slice(-1), direction]),
-      onArrival: () => setStatus('arrived'),
-    });
-  }, [goal]);
+    // Play safety onboarding prompt — loop starts after it finishes speaking
+    const safetyUtterance = new SpeechSynthesisUtterance(
+      'VisionGuide is a navigation aid only. Keep using your cane or other mobility aid.'
+    );
+    safetyUtterance.onend = () => {
+      setStatus('navigating');
+      setContext([]);
+      // Most common demo failure is holding the phone at the wrong angle — say so before the loop starts
+      speak('Hold your phone at chest height, pointing forward.');
+      setTimeout(() => {
+        startLoop(videoRef.current, streamRef, loopStateRef, {
+          onSpeak: handleSpeak,
+          onContextUpdate: handleContextUpdate,
+          onArrival: handleArrival,
+          onError: handleError,
+        });
+      }, 2500); // Wait for holding instruction to finish
+    };
+    window.speechSynthesis.speak(safetyUtterance);
 
+  }, [goal, status, handleSpeak, handleContextUpdate, handleArrival, handleError]);
+
+  // --- Stop navigation ---
   const handleStop = useCallback(() => {
     stopLoop();
-    stopCamera(cameraRef.current);
-    cameraRef.current = null;
+    resetSpeech();
     setStatus('idle');
+    setLastSpoken('');
+  }, []);
+
+  // --- Cleanup on unmount ---
+  useEffect(() => {
+    return () => {
+      stopLoop();
+      cancel();
+      if (streamRef.current) {
+        stopCamera(streamRef.current);
+        streamRef.current = null;
+      }
+    };
   }, []);
 
   return (
     <ErrorBoundary>
-      <CameraPreview videoRef={videoRef} />
-      <GoalInput
-        goal={goal}
-        onGoalChange={setGoal}
-        disabled={status === 'navigating'}
-        onMicClick={handleMicClick}
-        isListening={status === 'listening'}
-      />
-      <StartStopButton
-        status={status}
-        onStart={handleStart}
-        onStop={handleStop}
-        disabled={!goal}
-      />
-      <StatusDisplay status={status} lastSpoken={lastSpoken} />
+      {showOnboarding && <Onboarding onDismiss={handleOnboardingDismiss} />}
+      <div style={styles.container}>
+        <CameraPreview videoRef={videoRef} />
+
+        <div style={styles.content}>
+          <h1 style={styles.title}>VisionGuide</h1>
+
+          <GoalInput
+            goal={goal}
+            onGoalChange={setGoal}
+            disabled={status === 'navigating'}
+            isListening={status === 'listening'}
+            onStatusChange={setStatus}
+          />
+
+          <StartStopButton
+            status={status}
+            onStart={handleStart}
+            onStop={handleStop}
+            disabled={!goal.trim() || status === 'listening'}
+          />
+
+          <StatusDisplay
+            status={status}
+            lastSpoken={lastSpoken}
+          />
+        </div>
+      </div>
     </ErrorBoundary>
   );
 }
 
-export default App;
+const styles = {
+  container: {
+    minHeight: '100vh',
+    background: '#0f0f0f',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '24px',
+    fontFamily: 'system-ui, sans-serif',
+  },
+  content: {
+    width: '100%',
+    maxWidth: '480px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '20px',
+  },
+  title: {
+    color: '#ffffff',
+    fontSize: '28px',
+    fontWeight: '700',
+    margin: 0,
+    letterSpacing: '-0.02em',
+  },
+};

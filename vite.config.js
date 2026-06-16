@@ -6,5 +6,6 @@ export default defineConfig({
   server: {
     https: false,  // HTTP is fine for localhost
     port: 5173,
+    host: true,    // bind all interfaces (incl. IPv4) — required for devcontainer port forwarding
   },
 });

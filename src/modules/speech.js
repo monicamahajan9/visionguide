@@ -83,3 +83,14 @@ export function cancel() {
     window.speechSynthesis.speak(flush);
   }
 }
+
+/**
+ * Cancel speech and clear deduplication state.
+ * Use between sessions so a direction spoken at the end of one session
+ * doesn't suppress the same direction at the start of the next.
+ */
+export function resetSpeech() {
+  cancel();
+  lastSpokenText = '';
+  lastSpokenAt = 0;
+}

@@ -6,7 +6,7 @@ export function buildSystemPrompt(mode = 'navigation') {
   const baseSchema = `{
   "obstacles": [
     {
-      "type": string,       // e.g. "chair", "step", "door", "person"
+      "type": string,
       "direction": string,  // "left" | "center" | "right"
       "urgency": "high" | "medium" | "low"
     }
@@ -17,7 +17,7 @@ export function buildSystemPrompt(mode = 'navigation') {
 }`;
 
   const describeField = mode === 'describe'
-    ? `  "scene_description": string,  // one sentence, max 20 words — inserted before navigation_direction\n`
+    ? `  "scene_description": string,\n`
     : '';
 
   const schema = baseSchema.replace(
@@ -32,13 +32,24 @@ JSON structure:
 ${schema}
 
 Rules:
-- navigation_direction: max 15 words, action-oriented. Examples: "Move forward through the open door", "Turn left past the desk".
+- navigation_direction: max 15 words, action-oriented, references a specific visible landmark when one exists.
+  BAD: "Move forward." GOOD: "Move forward toward the elevator doors ahead."
+  BAD: "Turn left." GOOD: "Turn left at the blue door."
 - Use spatial words only: left, right, ahead, behind. Never compass directions.
-- obstacle urgency=high: object is within ~1 metre and directly on the user's path.
-- obstacle urgency=medium: object is nearby but not immediately blocking.
-- obstacle urgency=low: object is far away or to the side. Do not report these unless notable.
-- goal_found=true only when the goal is clearly visible and reachable in this frame.
-- goal_confidence: 0.0 (not visible) to 1.0 (directly in front, clearly identifiable).
+- All directions are from the perspective of the person holding the camera.
+  Left = their left hand. Right = their right hand. Not a viewer or third-person perspective.
+- Scan the full width of the image for obstacles, not just center frame.
+  Report any object within approximately 2 metres on the path ahead.
+- urgency=high: stationary object directly blocking the path within 1 metre only.
+- urgency=medium: object nearby but not immediately blocking, or person passing to the side.
+- urgency=low: object far away or clearly off the path. Do not report unless notable.
+- Moving people passing to the side are urgency=medium at most, never high.
+- An open door, a wall at the end of a corridor, or a recessed doorway is not an obstacle.
+- For text-based goals (room numbers, named rooms), look for signage on doors and walls.
+  goal_found=true if the sign is visible and readable even if not fully centered.
+  goal_confidence reflects how clearly the visible sign matches the goal string.
+- If goal is not visible: goal_found=false, goal_confidence=0.
 - If nothing is blocking and the path is clear, say so: "Path is clear, continue ahead."
-- Return valid JSON only. No other text.`;
+- Do NOT include scene descriptions or commentary. Navigation output only.
+- Return valid JSON only. Nothing else.`;
 }

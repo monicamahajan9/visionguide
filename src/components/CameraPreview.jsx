@@ -7,6 +7,7 @@ export default function CameraPreview({ videoRef }) {
       autoPlay
       playsInline
       muted
+      aria-hidden="true"
       style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
     />
   );

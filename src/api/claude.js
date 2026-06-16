@@ -1,3 +1,5 @@
+import { getLandmarkContext } from '../modules/landmarks.js';
+
 const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY;
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 
@@ -9,31 +11,45 @@ if (!API_KEY) {
  * @param {string} systemPrompt
  * @param {Array} messages       - Anthropic messages array
  * @returns {Promise<object>}    - Parsed JSON from Claude
- * @throws {Error}               - On network failure or non-200 response
+ * @throws {Error}               - 'network_failure' | 'rate_limited' | 'api_error_<status>'
  */
 export async function callClaude(systemPrompt, messages) {
-  const response = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 500,  // 300 risks truncating multi-obstacle JSON mid-stream; 500 provides headroom
-      system: systemPrompt,
-      messages,
-    }),
-  });
+  let response;
+
+  try {
+    response = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'x-api-key': API_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 500,  // 300 risks truncating multi-obstacle JSON mid-stream; 500 provides headroom
+        system: systemPrompt,
+        messages,
+      }),
+    });
+  } catch (networkErr) {
+    // Network failure — fetch itself threw (offline, DNS failure, etc.)
+    console.warn('Network error:', networkErr.message);
+    throw new Error('network_failure', { cause: networkErr });
+  }
+
+  if (response.status === 429) {
+    console.warn('Rate limited by Anthropic API');
+    throw new Error('rate_limited');
+  }
 
   if (!response.ok) {
-    throw new Error(`Anthropic API error: ${response.status}`);
+    console.warn('Anthropic API error:', response.status);
+    throw new Error(`api_error_${response.status}`);
   }
 
   const data = await response.json();
-  const text = data.content[0].text;
+  const text = data.content?.[0]?.text ?? '';
 
   try {
     return JSON.parse(text);
@@ -60,12 +76,21 @@ export function buildUserMessage(goal, context, base64Frame) {
     ? `Prior directions: ${context.join(' → ')}`
     : 'No prior context.';
 
+  const landmarkText = getLandmarkContext();
+
+  const textParts = [
+    `Goal: ${goal}`,
+    contextText,
+    landmarkText,
+    'Analyze this frame.',
+  ].filter(Boolean).join('\n');
+
   return {
     role: 'user',
     content: [
       {
         type: 'text',
-        text: `Goal: ${goal}\n${contextText}\nAnalyze this frame.`,
+        text: textParts,
       },
       {
         type: 'image',
