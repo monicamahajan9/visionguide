@@ -40,6 +40,24 @@ let lastSpokenText = '';
 let lastSpokenAt = 0;
 const DEDUP_WINDOW_MS = 10_000;
 
+// Queued (non-interrupting) utterances are spaced apart so commands don't
+// run into each other — the browser's native queue plays them back-to-back
+// with no gap otherwise.
+const QUEUE_PAUSE_MS = 400;
+let speechQueue = [];
+let isProcessingQueue = false;
+
+function processQueue() {
+  if (isProcessingQueue || speechQueue.length === 0) return;
+  isProcessingQueue = true;
+  const utterance = speechQueue.shift();
+  utterance.onend = () => {
+    isProcessingQueue = false;
+    setTimeout(processQueue, QUEUE_PAUSE_MS);
+  };
+  window.speechSynthesis.speak(utterance);
+}
+
 /**
  * Speak text via TTS.
  * @param {string} text
@@ -61,7 +79,8 @@ export function speak(text, interrupt = false) {
   }
 
   const utterance = createUtterance(text);
-  window.speechSynthesis.speak(utterance);
+  speechQueue.push(utterance);
+  processQueue();
 
   lastSpokenText = text;
   lastSpokenAt = now;
@@ -74,6 +93,8 @@ export function speak(text, interrupt = false) {
  * Fix: queue a zero-volume utterance at rate=10 to flush the speech queue.
  */
 export function cancel() {
+  speechQueue = [];
+  isProcessingQueue = false;
   window.speechSynthesis.cancel();
   // Android workaround: if speech is still active after cancel(), force-flush with a silent fast utterance
   if (window.speechSynthesis.speaking) {

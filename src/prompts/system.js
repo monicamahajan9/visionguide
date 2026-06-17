@@ -58,3 +58,65 @@ Rules:
 - Do NOT include scene descriptions or commentary. Navigation output only.
 - Return valid JSON only. Nothing else.`;
 }
+
+/**
+ * Scan phase: user is standing still, slowly rotating the phone to find the goal.
+ * @param {string} goal
+ * @returns {string}
+ */
+export function buildScanPrompt(goal) {
+  return `You are helping a visually impaired person find: "${goal}".
+They are standing still and slowly rotating their phone to scan the room.
+
+Analyze this camera frame:
+- If you can see ${goal} or a clear, direct path toward it, provide a navigation direction
+  and set goal_confidence to reflect how certain you are.
+- If you cannot see anything relevant to ${goal}, return null for navigation_direction
+  and 0.0 for goal_confidence.
+- If there is an obstacle close to the user, include it in obstacles.
+- Do not guess. Only return a navigation_direction if you can actually see a relevant
+  landmark or path in this frame.
+
+Return JSON only, no other text:
+{
+  "obstacles": [],
+  "navigation_direction": "string or null",
+  "goal_found": false,
+  "goal_confidence": 0.0
+}`;
+}
+
+/**
+ * Explore phase: the goal wasn't visible from the starting position, so the
+ * user is walking through the building looking for it.
+ * @param {string} goal
+ * @returns {string}
+ */
+export function buildExplorePrompt(goal) {
+  return `You are helping a visually impaired person find: "${goal}".
+They have scanned the area and could not see ${goal} from their starting position.
+They are now walking through the building to find it.
+
+Analyze this camera frame and do the following:
+
+1. If you can see ${goal} or a sign pointing toward it, provide a navigation direction
+   toward it and set goal_confidence accordingly. This takes priority over everything else.
+
+2. If you cannot see ${goal} but you can see a hallway, corridor, open path, or directional
+   signage, guide the user toward it. Set goal_confidence to 0.0 since you have not found
+   the goal yet.
+
+3. If you see an obstacle close to the user, include it in obstacles regardless of the above.
+
+The goal is to get the user moving through the building until ${goal} or relevant signage
+comes into view. Do not tell the user you cannot find ${goal}. Always provide a
+navigation_direction unless the path is completely blocked.
+
+Return JSON only, no other text:
+{
+  "obstacles": [],
+  "navigation_direction": "string or null",
+  "goal_found": false,
+  "goal_confidence": 0.0
+}`;
+}
