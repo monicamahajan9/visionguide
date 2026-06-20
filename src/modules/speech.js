@@ -27,9 +27,25 @@ function selectVoice() {
 window.speechSynthesis.onvoiceschanged = () => { selectedVoice = null; };
 
 // Chrome silently drops the first speak() call after a fresh page load while
-// the synthesis engine is still initializing. Warm it up with a throwaway
-// empty utterance so the real first utterance (the auto-listen prompt) isn't it.
-window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+// the synthesis engine is still initializing. Warm it up with a near-silent
+// primer utterance so the real first utterance (the auto-listen prompt) isn't
+// it. A single space, not an empty string — empty-text utterances can hang
+// indefinitely on some Chrome builds and block every utterance queued after
+// them, since the native speech queue is strictly FIFO.
+const primer = new SpeechSynthesisUtterance(' ');
+primer.volume = 0;
+primer.rate = 10;
+let primerSettled = false;
+primer.onend = () => { primerSettled = true; };
+primer.onerror = () => { primerSettled = true; };
+window.speechSynthesis.speak(primer);
+// Defense-in-depth: if the primer itself somehow hangs, force-clear the native
+// queue after a short delay. Since the native queue is strictly FIFO and the
+// primer is the first thing ever queued, nothing real could have started
+// speaking yet if the primer hasn't settled — so this can't cut off real speech.
+setTimeout(() => {
+  if (!primerSettled) window.speechSynthesis.cancel();
+}, 1500);
 
 function createUtterance(text) {
   const u = new SpeechSynthesisUtterance(text);
