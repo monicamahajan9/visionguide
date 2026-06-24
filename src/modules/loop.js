@@ -36,7 +36,9 @@ import {
   EXPLORE_TIMEOUT_MS,
   SCAN_MODEL,
   NAVIGATE_MODEL,
+  DEAD_END_CHECK_STREAK,
   DEAD_END_STREAK,
+  SMALL_SPACE_HOLDOFF_MS,
 } from '../constants.js';
 
 let intervalId = null;
@@ -47,6 +49,7 @@ let consecutiveStaleDrops = 0;
 let lastStaleWarningAt = 0;
 let lastDropNoticeAt = 0;
 let consecutivePathBlocked = 0;
+let lastSmallSpaceAnnouncedAt = 0;
 
 // 'scan' | 'explore' | 'navigate' — see 05-visionguide-scan-phase-spec.md
 let phase = 'scan';
@@ -232,6 +235,7 @@ export function startLoop(videoEl, streamRef, stateRef, callbacks) {
         // direction (e.g. a fully blocked view) — never leave the user with
         // silence once explore phase has started.
         if (!isStale && !turnedAway) {
+          maybeAnnounceSmallSpace(result);
           if (result.path_blocked) {
             handlePathBlocked();
             return;
@@ -348,6 +352,19 @@ export function startLoop(videoEl, streamRef, stateRef, callbacks) {
     lastDropNoticeAt = now;
   }
 
+  // Explore phase only: call out that the user has walked into a confined
+  // room/closet/alcove, distinct from the regular per-tick navigation_direction
+  // — this is a one-shot orientation cue, throttled like the other voice cues
+  // above so it doesn't repeat every tick while the user is still in there.
+  function maybeAnnounceSmallSpace(result) {
+    if (!result.small_space) return;
+    const now = Date.now();
+    if (now - lastSmallSpaceAnnouncedAt < SMALL_SPACE_HOLDOFF_MS) return;
+    const msg = 'This looks like a small space.';
+    speak(msg, false, () => callbacks.onSpeak(msg));
+    lastSmallSpaceAnnouncedAt = now;
+  }
+
   // Shared hand-off from scan to explore phase, used both when the guided
   // scan completes (with or without a winning direction) and as the overall
   // safety-net timeout (scanTimerId) in case a leg never resolves.
@@ -355,6 +372,12 @@ export function startLoop(videoEl, streamRef, stateRef, callbacks) {
     if (scanTimerId !== null) {
       clearTimeout(scanTimerId);
       scanTimerId = null;
+    }
+    // Re-entrant (e.g. repeated "not here" rejections): clear any prior
+    // explore-timeout timer first, or the old one leaks and fires later,
+    // even after arrival, speaking the give-up message a second time.
+    if (exploreTimerId !== null) {
+      clearTimeout(exploreTimerId);
     }
     phase = 'explore';
     consecutivePathBlocked = 0;
@@ -368,14 +391,23 @@ export function startLoop(videoEl, streamRef, stateRef, callbacks) {
 
   // Called from the explore/navigate branches above when result.path_blocked
   // is true. Rather than repeating "no path"/whatever instruction came back
-  // every tick while stuck facing a wall or dead end, speak it once and then
-  // — if it persists for DEAD_END_STREAK frames — auto-reroute exactly like
-  // the manual "not here" voice command does.
+  // every tick while stuck facing a wall or dead end, speak it once, then at
+  // DEAD_END_CHECK_STREAK ask the user to check left/right (a forward-facing
+  // frame can miss an opening to the side) — and only if it still persists
+  // through DEAD_END_STREAK, auto-reroute exactly like the manual "not here"
+  // voice command does. A frame that clears in between (path_blocked: false)
+  // resets consecutivePathBlocked to 0 elsewhere, so panning to reveal an
+  // opening cancels this escalation automatically.
   function handlePathBlocked() {
     consecutivePathBlocked++;
     recordBlocked();
     if (consecutivePathBlocked >= DEAD_END_STREAK) {
       handleRejectGoal("Dead end. Turn around and I'll guide you a different way.");
+      return;
+    }
+    if (consecutivePathBlocked === DEAD_END_CHECK_STREAK) {
+      const msg = "Still blocked. Let's check left and right for an opening.";
+      speak(msg, false, () => callbacks.onSpeak(msg));
       return;
     }
     if (consecutivePathBlocked === 1) {

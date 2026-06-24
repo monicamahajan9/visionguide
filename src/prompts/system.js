@@ -73,6 +73,10 @@ Rules:
 - urgency=low: object far away or clearly off the path. Do not report unless notable.
 - Moving people passing to the side are urgency=medium at most, never high.
 - An open door, a wall at the end of a corridor, or a recessed doorway is not an obstacle.
+- A door swung fully open lies flat against the adjacent wall and can look like a closed door
+  or a continuation of the wall from some angles. Before treating a doorway as closed, look for
+  the door's hinge edge, the frame, or the room visible beyond it — don't assume a flush door
+  panel means the path is blocked.
 - For text-based goals (room numbers, named rooms), look for signage on doors and walls.
   goal_found=true only when the destination is immediately at hand: the user is right in
   front of it (e.g. standing at the door, close enough to reach for the handle), not merely
@@ -120,6 +124,8 @@ Analyze this camera frame:
 - path_openness: rate 0.0-1.0 how open and navigable this direction looks overall — a clear
   corridor, doorway, or visible walkway scores high; a flat wall, dead end, or heavily
   cluttered/blocked view scores low. This is independent of whether ${goal} itself is visible.
+  A door swung fully open lies flat against the adjacent wall and can look like a closed door
+  or a flat wall — check for the doorway opening or room beyond before scoring it as blocked.
 
 Return JSON only, no other text:
 {
@@ -196,13 +202,20 @@ path_blocked: true when the frame shows a wall, the back of an enclosed space (c
 small room) with no doorway/opening other than where the user entered, or shelving/racks/furniture
 filling the frame with no passable gap on any side — i.e. nothing navigable ahead, left, or
 right. When path_blocked is true, set navigation_direction to null. Never say "continue", "move
-forward", or invent any path over a wall or dead end.
+forward", or invent any path over a wall or dead end. A door swung fully open lies flat against
+the adjacent wall and can look like a closed door or a continuation of the wall — look for the
+doorway opening or the room visible beyond before treating it as blocked.
+
+small_space: true whenever the frame shows the user standing inside a confined room, closet, or
+alcove (regardless of path_blocked) — set this as soon as it's recognizable, even before you know
+whether it's a dead end.
 
 Return JSON only, no other text:
 {
   "obstacles": [],
   "navigation_direction": "string or null",
   "path_blocked": false,
+  "small_space": false,
   "goal_found": false,
   "goal_confidence": 0.0
 }`;

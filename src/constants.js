@@ -17,7 +17,9 @@ export const STALE_WARNING_HOLDOFF_MS = 15_000; // Max one "too fast" warning pe
 export const DROP_NOTICE_HOLDOFF_MS = 10_000;
 export const DEV_MODE = false; // Set to true locally for debugging
 export const NAV_TURN_CANCEL_DEG = 20; // Drop explore/navigate guidance if the user has rotated this many degrees since the frame was captured — it no longer reflects where they're pointing
-export const DEAD_END_STREAK = 2; // Consecutive path_blocked frames (explore/navigate) before auto-rerouting instead of repeating
+export const DEAD_END_CHECK_STREAK = 2; // Consecutive path_blocked frames before suggesting a left/right check
+export const DEAD_END_STREAK = 4; // Consecutive path_blocked frames before auto-rerouting instead of repeating — gives a couple ticks after the left/right check prompt for the user to actually pan
+export const SMALL_SPACE_HOLDOFF_MS = 30_000; // Max one "small space" callout per 30s
 
 // --- Scan & explore phases (05-visionguide-scan-phase-spec.md) ---
 export const SCAN_INTERVAL_MS         = 500;    // 2fps during scan phase
