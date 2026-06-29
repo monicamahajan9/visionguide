@@ -16,7 +16,7 @@ if (!API_KEY) {
  * @returns {Promise<object>}    - Parsed JSON from Gemini
  * @throws {Error}               - 'network_failure' | 'rate_limited' | 'api_error_<status>' | DOMException 'AbortError'
  */
-export async function callClaude(systemPrompt, messages, signal, model = 'gemini-2.0-flash') {
+export async function callClaude(systemPrompt, messages, signal, model = 'gemini-2.5-flash') {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`;
   let response;
 
