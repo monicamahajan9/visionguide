@@ -45,7 +45,8 @@ export async function callClaude(systemPrompt, messages, signal, model = 'gemini
   }
 
   if (!response.ok) {
-    console.warn('Gemini API error:', response.status);
+    const errBody = await response.json().catch(() => null);
+    console.warn('Gemini API error:', response.status, errBody);
     throw new Error(`api_error_${response.status}`);
   }
 
